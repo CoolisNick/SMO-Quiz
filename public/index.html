@@ -1,0 +1,315 @@
+<html>
+    <head>
+        <title>SMO Quiz</title>
+        <link rel="stylesheet" href="./styles.css" />
+        <link rel="icon" href="images/burrbo.png" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0 maximum-scale=1" />
+        <meta charset="UTF-8" />
+        <meta property="og:title" content="SMO Quiz: Test your Odyssey knowledge!" />
+        <meta property="og:url" content="https://smo-quiz.herokuapp.com" />
+        <!-- <meta property="og:image" content="https://smo-quiz.herokuapp.com" /> -->
+        <meta name="description" content="SMO Quiz: Test your Odyssey knowledge!" />
+        <script>
+            let correctAnswer;
+            let questionType;
+            async function loadCard(card) {
+                if (!card) {
+                    const response = await fetch("/card.json");
+                    if (!response.ok) {
+                        await handleError(response);
+                        return;
+                    }
+                    card = await response.json();
+                }
+                document.cookie = "answered=; Max-Age=0";
+                const flashcard = document.getElementById("flashcard");
+                const results = document.getElementById("results");
+                if (card.done) {
+                    showResults(card, flashcard, results);
+                    document.cookie = "lastCard=; Max-Age=0";
+                    return;
+                }
+                flashcard.style.display = "";
+                results.style.display = "none";
+
+                document.cookie = `lastCard=${encodeURIComponent(
+                    JSON.stringify(card),
+                )}; SameSite=Lax; Max-Age=259200`;
+
+                const {
+                    question: { image = null, text, questionType: qType },
+                    answer,
+                    choices,
+                } = card;
+                correctAnswer = answer;
+                questionType = qType;
+                const imageElement = document.getElementById("image");
+                imageElement.style.display = "none";
+                const imgContainerElement = document.getElementById("images");
+                if (image) {
+                    imgContainerElement.style.display = "";
+                    imageElement.onload = () => {
+                        imageElement.style.display = "";
+                    };
+                    imageElement.src = image;
+                } else {
+                    imgContainerElement.style.display = "none";
+                }
+                const questionText = document.getElementById("questionText");
+                questionText.innerText = text;
+                const responseElement = document.getElementById("response");
+                responseElement.style.display = "none";
+                const submitButton = document.getElementById("submit");
+                submitButton.removeAttribute("disabled");
+                submitButton.style.display = "";
+                handleAnswerInput(choices);
+                document.getElementById("quizMenu").style.display = "none";
+            }
+
+            function handleAnswerInput(choices) {
+                const answerElement = document.getElementById("answerText");
+                const choicesElement = document.getElementById("choices");
+                if (questionType === "FirstScenarioFromName") {
+                    answerElement.style.display = "none";
+                    choicesElement.style.display = "";
+                    choicesElement.innerHTML = "";
+                    document.getElementById("submit").focus();
+                    for (const choice of choices) {
+                        const label = document.createElement("label");
+                        const labelText = document.createTextNode(` ${choice}`);
+                        const radio = document.createElement("input");
+                        radio.setAttribute("type", "radio");
+                        radio.setAttribute("name", "scenarioChoices");
+                        radio.setAttribute("value", choice);
+                        label.appendChild(radio);
+                        label.appendChild(labelText);
+                        choicesElement.appendChild(label);
+                        choicesElement.appendChild(document.createElement("br"));
+                    }
+                } else {
+                    answerElement.style.display = "";
+                    choicesElement.style.display = "none";
+                    answerElement.removeAttribute("disabled");
+                    answerElement.value = "";
+                    answerElement.focus();
+                }
+            }
+
+            function checkAnswer(event) {
+                event.preventDefault();
+                document.cookie = `answered=true; SameSite=Lax; Max-Age=259200`;
+                const answerElement = document.getElementById("answerText");
+                let answer = answerElement.value;
+                const feedbackElement = document.getElementById("feedback");
+                const responseElement = document.getElementById("response");
+                responseElement.style.display = "";
+                const submitButton = document.getElementById("submit");
+                answerElement.setAttribute("disabled", "true");
+                submitButton.style.display = "none";
+                submitButton.setAttribute("disabled", "true");
+                const nextButton = document.getElementById("newQuestion");
+                nextButton.focus();
+                if (questionType === "FirstScenarioFromName") {
+                    const selectedRadio = document.querySelector("input[type=radio]:checked");
+                    answer = selectedRadio?.value ?? "";
+                }
+                let reg;
+                if (questionType === "KingdomFromName") {
+                    if (correctAnswer.startsWith("Dark")) {
+                        reg = /(\W+|side\W*$)/g;
+                    } else {
+                        reg = /(\W+|kingdom\W*$)/g;
+                    }
+                } else {
+                    reg = /\W+/g;
+                }
+                const correct =
+                    correctAnswer.toLowerCase().replace(reg, "") ===
+                    answer.toLowerCase().replace(reg, "");
+                if (correct) {
+                    feedbackElement.innerText = "Correct!";
+                } else {
+                    feedbackElement.innerText = "Incorrect.";
+                }
+                feedbackElement.innerText += ` The answer is "${correctAnswer}"`;
+                updateCorrectAnswerCount(correct);
+            }
+
+            function updateCorrectAnswerCount(correct) {
+                fetch("/answer.json", {
+                    method: "POST",
+                    body: JSON.stringify({ correct }),
+                    headers: {
+                        "Content-Type": "application/json",
+                    },
+                });
+            }
+
+            function nextQuestion(event) {
+                event.preventDefault();
+                document.getElementById("image").style.display = "none";
+                loadCard();
+            }
+
+            async function createQuiz(event) {
+                event.preventDefault();
+                const data = new FormData(event.target);
+                const queryString = new URLSearchParams(data).toString();
+                const errorElement = document.getElementById("error");
+                const response = await fetch("/quiz.json", {
+                    method: "POST",
+                    body: queryString,
+                    headers: {
+                        "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+                    },
+                });
+                if (!response.ok) {
+                    await handleError(response);
+                    return;
+                }
+                errorElement.innerText = "";
+                loadCard();
+            }
+
+            async function handleError(response) {
+                const text = await response.text();
+                let errorMessage;
+                try {
+                    const json = JSON.parse(text);
+                    errorMessage = json.error;
+                } catch (err) {
+                    errorMessage = text;
+                }
+                document.getElementById("error").innerText = errorMessage;
+            }
+
+            function checkCookies() {
+                const cookies = getCookies();
+                if (!cookies.lastCard) {
+                    document.getElementById("quizMenu").style.display = "";
+                } else if (cookies.answered) {
+                    loadCard();
+                } else {
+                    loadCard(JSON.parse(cookies.lastCard));
+                }
+            }
+
+            function getCookies() {
+                return Object.fromEntries(
+                    document.cookie
+                        .split(/; ?/)
+                        .map((cookie) =>
+                            cookie.split("=").map((element) => decodeURIComponent(element)),
+                        ),
+                );
+            }
+
+            async function showQuizMenu(event) {
+                event.preventDefault();
+                document.cookie = "lastCard=; Max-Age=0";
+                document.getElementById("quizMenu").style.display = "";
+                document.getElementById("results").style.display = "none";
+                document.getElementById("flashcard").style.display = "none";
+                await fetch("/quiz.json", { method: "DELETE" });
+            }
+
+            function showResults(card, flashcard, results) {
+                document.getElementById(
+                    "correctAnswers",
+                ).innerText = `${card.correctAnswers}/${card.numCards}`;
+                const judgmentText = document.getElementById("judgmentText");
+                const correctRatio = card.correctAnswers / card.numCards;
+                if (correctRatio === 1) {
+                    judgmentText.innerText = "Perfect!";
+                } else if (correctRatio >= 0.8) {
+                    judgmentText.innerText = "Incredible!";
+                } else if (correctRatio >= 0.5) {
+                    judgmentText.innerText = "Great job!";
+                } else if (correctRatio > 0) {
+                    judgmentText.innerText = "Good try!";
+                } else {
+                    judgmentText.innerText = "Oh no...";
+                }
+                flashcard.style.display = "none";
+                results.style.display = "";
+            }
+        </script>
+    </head>
+    <body onload="checkCookies()">
+        <h1>SMO Quiz</h1>
+        <form id="quizMenu" onsubmit="createQuiz(event)" style="display: none">
+            <p id="error"></p>
+            <fieldset>
+                <legend>Select the options for your quiz</legend>
+                <label
+                    ><input
+                        type="checkbox"
+                        name="questionTypes[]"
+                        value="KingdomFromName"
+                        checked
+                    />
+                    Choose kingdom from name</label
+                ><br />
+                <label
+                    ><input type="checkbox" name="questionTypes[]" value="NameFromImage" checked />
+                    Choose name from image</label
+                ><br />
+                <!-- <label
+                    ><input
+                        type="checkbox"
+                        name="questionTypes[]"
+                        value="MapLocationFromName"
+                        checked
+                    />
+                    Choose map location from name</label
+                ><br /> -->
+                <label
+                    ><input
+                        type="checkbox"
+                        name="questionTypes[]"
+                        value="FirstScenarioFromName"
+                        checked
+                    />
+                    Choose first scenario from name</label
+                ><br />
+                <p>
+                    <label
+                        >How many questions? <input type="text" name="numCards" value="20"
+                    /></label>
+                </p>
+                <input type="submit" value="Start quiz!" />
+            </fieldset>
+        </form>
+        <div id="flashcard" style="display: none">
+            <a href="/" onclick="showQuizMenu(event)">Back to menu</a>
+            <div id="question">
+                <div id="images">
+                    <img src="/images/loader.gif" alt="Loading..." width="50px" />
+                    <img id="image" src="data:," alt="Moon" />
+                </div>
+                <p id="questionText"></p>
+            </div>
+            <div id="answer">
+                <form onsubmit="checkAnswer(event)">
+                    <input id="answerText" type="text" />
+                    <div id="choices"></div>
+                    <input id="submit" type="submit" value="Submit" />
+                </form>
+                <div id="response" style="display: none">
+                    <p id="feedback"></p>
+                    <form onsubmit="nextQuestion(event)">
+                        <input id="newQuestion" type="submit" value="Next question" />
+                    </form>
+                </div>
+            </div>
+        </div>
+        <div id="results" style="display: none">
+            <p>You're done! You got:</p>
+            <p id="correctAnswers"></p>
+            <p id="judgmentText"></p>
+            <form action="/" onsubmit="showQuizMenu(event)">
+                <button>Go to menu</button>
+            </form>
+        </div>
+    </body>
+</html>
